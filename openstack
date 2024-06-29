@@ -1,0 +1,221 @@
+OpenStack repository (ubnt 20.04):
+
+add repo:
+```
+add-apt-repository cloud-archive:wallaby -
+```
+
+install openstack-client and MySQL server:
+```
+apt update -y
+apt install mysql-server python3-openstackclient -y
+```
+
+The OpenStack Identity service (a.k.a. Keystone) is a single point of integration for managing authentication, authorization, and a catalog of services. Interaction among the services in OpenStack is done by connecting to the endpoints stored on Keystone.
+
+
+Before install Keystone, we need to set up a database for the service:
+
+Define a username and password for the service database using the commands below:
+
+```
+mysql -u root -e "CREATE USER 'keystone'@'localhost' IDENTIFIED BY 'changeme';"
+mysql -u root -e "CREATE USER 'keystone'@'%' IDENTIFIED BY 'changeme';"
+```
+
+Finally, grant privileges for the user on the database created:
+```
+mysql -u root -e "GRANT ALL ON keystone.* TO 'keystone'@'localhost';"
+mysql -u root -e "GRANT ALL ON keystone.* TO 'keystone'@'%';"
+```
+
+With the database prepared, we are going to install and configure the Keystone components.
+
+Execute the following command to install Keystone:
+```
+apt install keystone -y
+```
+
+Edit the configuration file and set the required paramenters. The default file location is /etc/keystone/keystone.conf
+
+In the [database] section, configure the database access with the credentials created previously. If any other connection options are present, comment/remove them.
+
+```
+[database]
+connection = mysql+pymysql://keystone:changeme@localhost/keystone
+```
+In the [token] section, configure the Fernet token provider:
+```
+[token]
+provider = fernet
+```
+
+With the database prepared, we are going to install and configure the Keystone components.
+
+Populate the Keystone database:
+
+```
+su -s /bin/sh -c "keystone-manage db_sync" keystone
+```
+
+Initialize the Fernet key repositories. The --keystone-user and --keystone-group flags correspond to the user and group used to run Keystone service:
+
+```
+keystone-manage fernet_setup --keystone-user keystone --keystone-group keystone
+keystone-manage credential_setup --keystone-user keystone --keystone-group keystone
+```
+
+bootstrap the Identity service:
+```
+keystone-manage bootstrap --bootstrap-username admin \
+  --bootstrap-password changeme \
+  --bootstrap-admin-url http://localhost:5000/v3/ \
+  --bootstrap-internal-url http://localhost:5000/v3/ \
+  --bootstrap-public-url http://localhost:5000/v3/ \
+  --bootstrap-region-id RegionOne
+  ```
+
+Edit apache\httpd config to configure the ServerName directive to reference the controller node. For this example, we are setting it as localhost:
+```
+sed -i '57 a ServerName localhost' /etc/apache2/apache2.conf
+```
+Restart\reload the apache2\httpd to apply:
+```
+systemctl restart apache2
+```
+
+Configure the Keystone administrative account by setting the proper environmental variables. These variables will be used to setup other services. (in real case please check vars - and i think it is need to set under "keystone" user)
+
+```
+export OS_USERNAME=admin
+export OS_PASSWORD=changeme
+export OS_PROJECT_NAME=admin
+export OS_USER_DOMAIN_NAME=Default
+export OS_PROJECT_DOMAIN_NAME=Default
+export OS_AUTH_URL=http://localhost:5000/v3
+export OS_IDENTITY_API_VERSION=3
+```
+
+A file named "admin_openrc" exists in the current user's home directory ("keystone"? i think it is - because killercoda machines are ебучие containers где нихуя не понятно что ты блядь такое и ты кто такой сука ёбаный рот этого казино (you are root but $ and switching is not working)), and the command source admin_openrc can be used to export these variables later on.
+
+Creating domain, project, user, and role
+
+creating a domain, project, and user
+
+Keystone provides authentication for each OpenStack service, and uses a combination of domains, projects, users, and roles to authenticate and authorize requests. Each OpenStack service uses a unique user to authenticate in Keystone, and are created in the service project.
+
+Execute the following command to create the service project in the default domain:
+```
+openstack project create --domain default --description "Service Project" service
+```
+```
++-------------+----------------------------------+
+| Field       | Value                            |
++-------------+----------------------------------+
+| description | Service Project                  |
+| domain_id   | default                          |
+| enabled     | True                             |
+| id          | 8069ea7d62bb4e4ab0c187e500f8706f |
+| is_domain   | False                            |
+| name        | service                          |
+| options     | {}                               |
+| parent_id   | default                          |
+| tags        | []                               |
++-------------+----------------------------------+
+```
+
+Non administrative tasks should be executed using unprivileged project and user. Execute the following procedure to create custom resources.
+Create a new domain:
+```
+openstack domain create --description "My First Domain" mydomain
+```
+```
++-------------+----------------------------------+
+| Field       | Value                            |
++-------------+----------------------------------+
+| description | Service Project                  |
+| domain_id   | default                          |
+| enabled     | True                             |
+| id          | 8069ea7d62bb4e4ab0c187e500f8706f |
+| is_domain   | False                            |
+| name        | service                          |
+| options     | {}                               |
+| parent_id   | default                          |
+| tags        | []                               |
++-------------+----------------------------------+
+```
+
+Create a project in the domain mydomain :
+```
+openstack project create --domain mydomain --description "My First Project" myproject
+```
+```
++-------------+----------------------------------+
+| Field       | Value                            |
++-------------+----------------------------------+
+| description | My First Domain                  |
+| enabled     | True                             |
+| id          | 0abc92785da8487f877b0ff1468a0a25 |
+| name        | mydomain                         |
+| options     | {}                               |
+| tags        | []                               |
++-------------+----------------------------------+
+```
+
+Create a user in the mydomain domain. The --password-prompt flag requires you to interactively create a password.
+```
+openstack user create --domain mydomain --password-prompt myuser
+```
+```
++-------------+----------------------------------+
+| Field       | Value                            |
++-------------+----------------------------------+
+| description | My First Project                 |
+| domain_id   | 0abc92785da8487f877b0ff1468a0a25 |
+| enabled     | True                             |
+| id          | a9e65e8ecd0143e3a55a4da9ff5cb653 |
+| is_domain   | False                            |
+| name        | myproject                        |
+| options     | {}                               |
+| parent_id   | 0abc92785da8487f877b0ff1468a0a25 |
+| tags        | []                               |
++-------------+----------------------------------+
+```
+Create a role in the mydomain domain:
+```
+openstack role create --domain mydomain myrole
+```
+```
++-------------+----------------------------------+
+| Field       | Value                            |
++-------------+----------------------------------+
+| description | None                             |
+| domain_id   | 0abc92785da8487f877b0ff1468a0a25 |
+| id          | bffe4fd291f9452cab3e5e82890156fb |
+| name        | myrole                           |
+| options     | {}                               |
++-------------+----------------------------------+
+```
+Finally, assign the role myrole to project myproject and user myuser . The flags --project-domain and --role-domain respectively specify the domain the project and role belong to.
+```
+openstack role add --project-domain mydomain --role-domain mydomain --project myproject --user myuser myrole
+```
+If the command succeeds, it doesn't provide an output.
+
+
+This procedure can be executed multiple times to create additional domains, projects, roles and users.
+
+
+
+\o/ Yay! \o/
+
+You finished the Basic Installation scenario. I hope you enjoyed.
+
+ага, копипастишь команды и в настроенном контейнере все работает - чудеса прям
+```
+- бабушка, а мне снилось что я разворачивал опенстак во сне
+- а зачем тебе опенстак?
+- да телки губастые пишут - с понтом на работу зовут - а там опенстак ннада
+```
+
+

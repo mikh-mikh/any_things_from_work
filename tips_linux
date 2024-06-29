@@ -1,0 +1,76 @@
+#####найти и скопировать только скрытые файлы
+find dir/ -name ".*" -exec cp -p {} /opt/appdata/hidden/ \;
+#####найти и скопировать все кроме скрытых файлов
+find dir/ -name "*" -exec cp -r {} /path
+
+######Грепание
+grep -IlR 't$' /opt/appdata/files/ | xargs rm # грепнуть файлы с последними символами в строках "t" (не забыть бакс - конец строки) и удалить их
+
+######Sudoers
+разрешение команды от рута группе со всеми параметрами и ключами (*):
+%devs ALL=(ALL) NOPASSWD:/usr/bin/dnf *
+
+######Firewalld
+включеный по умолчанию пускает только 22 порт, 80 и кокпит остальное закрывает, открыть так:
+firewall-cmd --permanent --zone=public --add-service=http
+firewall-cmd --permanent --add-port=[YOUR PORT]/tcp
+firewall-cmd --reload
+
+#####згрепание с пайпом на греп и пайпами:
+
+zgrep -ci '<search string>' $(ls /var/log/ | grep "qradar\.error\..*\gz")
+zgrep -ci '<search string>' $(ls /var/log/qradar.old/ | grep "qradar\.log\..*\gz")
+zgrep -ci '<search string>' $(ls /var/log/audit/ | grep ".*\.*\..*\gz")
+
+[root@qr_example audit]# zgrep -ci 'example_user' $(ls /var/log/audit/ | grep "audit\.*\..*\gz")
+audit-healthconsole.log:0
+audit-healthconsole.log.1.gz:0
+audit.log:1
+audit.log.1.gz:44
+audit.log.2.gz:0
+audit.log.3.gz:0
+audit.log.4.gz:52
+
+For limited number of entries (100 entries), remove the -c switch and add | less at the end:
+zgrep -i 'example_user' $(ls /var/log/ | grep ".*\.*\..*\gz") | less
+
+To add the entries to a file to review later or add to a support ticket, do the following:
+zgrep -i 'example_user' $(ls /var/log/ | grep ".*\.*\..*\gz") > /tmp/example_user.txt
+
+########поиск и замена по сase-sensetive и нет:
+
+#!/bin/bash export LC_ALL=C for file in $(find /path/to/folder -name '*.txt');
+do sed -i -r 's/Financial Services/Finance and Insurance/g' $file 
+done
+########поиск и замена без case sensitive:
+#!/bin/bash
+# Take the search string
+read -p "Enter the search string: " search
+# Take the replace string
+read -p "Enter the replace string: " replace
+if [[ $search != "" && $replace != "" ]]; then
+sed -i "s/$search/$replace/gi" $1
+fi
+
+####acl
+
+setfacl:
+права - RWX (липкий бит я хз)
+наследование (-dm) - если в директории создают файлы другие (реальные владельцы) -
+не те кто через setfacl добавляем - чтобы они наследовали чужое содержимое каталога
+
+setfacl -m "u:пользователь:права" <file/dir> 
+setfacl -m "g:группа:права" <file/dir>
+setfacl -m "other:права" <file/dir>
+setfacl -dm "запись_ACL" <dir>
+
+###архивы:
+tar -czvf file.tar.gz /full/path
+tar -xf file.tar.gz
+квота хранилки (xfs):
+для группы (engineering)
+xfs_quota -x -c 'limit -g bsoft=6144m bhard=8192m isoft=1000 ihard=1200 engineering' /home
+
+
+
+
