@@ -1,0 +1,19 @@
+
+
+GRANT ALL ON *.* TO 'admin'@'localhost' IDENTIFIED BY 'password' WITH GRANT OPTION;
+Create a remote user:
+
+GRANT ALL ON *.* TO 'ruser'@'%' IDENTIFIED BY 'password' WITH GRANT OPTION;
+Update database privileges:
+
+FLUSH PRIVILEGES;
+Exit from MariaDB CLI
+
+exit
+When the firewall is enabled, add rules to open port 3306 and restart the firewall.
+
+sudo ufw allow 3306 & ufw reload
+After setup you have login and create new database in to MariaDB server by use created users for example:
+
+mariadb -u ruser -p
+CREATE DATABASE softserve;

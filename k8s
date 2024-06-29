@@ -1,0 +1,338 @@
+#### простой деплой делоймента с подом и лейблом
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+
+
+#### роли и RBAC
+
+создать сервис-учетку в неймспейсе:
+k -n ns1 create sa pipeline # создать сервисакк (sa) "pipeline" в неймспейсе "ns1" 
+
+посмотреть(?) роль
+k get clusterrole view
+
+прибиндить роль "view" с созданному сервисакку в неймспейсах ns1 и ns2:
+k create clusterrolebinding pipeline-view --clusterrole view --serviceaccount ns1:pipeline --serviceaccount ns2:pipeline
+
+создать новую роль для прибинда с правами и применимую для ресурса "deployments":
+k create clusterrole pipeline-deployment-manager --verb create,delete --resource deployments
+
+прибиндить вышесделанную роль к сервисаккаунту в неймспейсах:
+k -n ns1 create rolebinding pipeline-deployment-manager --clusterrole pipeline-deployment-manager --serviceaccount ns1:pipeline
+k -n ns2 create rolebinding pipeline-deployment-manager --clusterrole pipeline-deployment-manager --serviceaccount ns2:pipeline
+
+проверка (can-i) что может ли сервисакк (pipeline) с прибиндеными к ней ролями ранее удалять (delete) deployments в неймспейсе (ns1):
+k auth can-i delete deployments --as system:serviceaccount:ns1:pipeline -n ns1   ### pipeline-учетка  в ns1-неймспейс 
+
+Еще:
+@@@@@@@@@@
+## Role
+kubectl create role developer-role --resource=pods,svc,pvc --verb="*" -n development
+## RoleBinding
+kubectl create rolebinding developer-rolebinding --role=developer-role --user=martin -n development
+## Martin
+kubectl config set-credentials martin --client-certificate ./martin.crt --client-key ./martin.key
+kubectl config set-context developer --cluster kubernetes --user martin
+## kube-config
+kubectl config use-context developer
+##To validate the access,
+kubectl get all -n development
+kubectl get rolebindings -n development
+kubectl config get-contexts
+@@@@@@@@@@
+
+
+#### deploy cluster (не hard way):
+
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+apt install -y kubelet=1.20.0-00 kubeadm=1.20.0-00 kubectl=1.20.0-00
+apt-mark hold kubelet kubeadm kubectl     # important - because apt-get upgrade makes breaks cluster
+docker full install
+mkdir /etc/docker
+
+cat <<EOF | sudo tee /etc/docker/daemon.json
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+
+systemctl enable docker
+systemctl daemon-reload
+systemctl restart docker
+
+on control plane run it:
+kubeadm init --ignore-preflight-errors=all
+mkdir -p $HOME/.kube
+cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+chown $(id -u):$(id -g) $HOME/.kube/config
+
+Step 3: Join your nodes to your Kubernetes cluster
+on controlplane
+kubeadm token create --print-join-command
+output of comand need to ru on worker nodes like this
+kubeadm join 10.5.1.30:6443 --token homqkg.dlefp6okwtmlqjjj     --discovery-token-ca-cert-hash sha256:eae9f031831c9fe1bfb22a4a7b59c0d2baf728c73efdcff18de98e9f130f2506
+after run it on controlplane to check:
+kubectl get nodes
+output will be like this:
+NAME      STATUS     ROLES                  AGE     VERSION
+kube-01   NotReady   control-plane,master   2m56s   v1.x.x
+kube-02   NotReady   <none>                 95s     v1.x.x
+kube-03   NotReady   <none>                 93s     v1.x.x
+
+install net (weave)
+on control plane:
+kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s-1.11.yaml
+after several mins you need to check:
+kubectl get pods --all-namespaces
+видим что все в running, next check:
+kubectl get nodes
+видим что статусы воркеров ушли в ready хоть и без ролей пока что  next:
+
+
+
+
+
+
+###### diag and fix apiserver
+
+k -n kube-system get pod 			                   # шлет нахуй т.к api-server сломан
+crictl ps 					                             # показывает контейнеры в обход api-server
+cat /var/log/pods/kube-system_kube-apiserver-*   # логи как правило они там
+далее статейка: 
+https://jvns.ca/blog/2017/08/05/how-kubernetes-certificates-work/
+по итогу как то починил в роли учебной задачи - там намудрили с сертификатами
+
+
+
+###### storages
+check:
+kubectl get storageclasses --all-namespaces
+
+
+### PV and PVC manifests
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-ciro
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 0.1Gi
+  volumeName: demo
+
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: demo
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Recycle
+  storageClassName: standard
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  nfs:
+    path: /tmp
+    server: 172.17.0.2
+
+
+
+###### k8s job template
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: countdown-datacenter
+spec:
+    template:
+      metadata:
+        name: countdown-datacenter
+    spec:
+      metadata:
+      containers:
+      - name: container-countdown-datacenter
+        image: centos:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          [ "sleep 5"]
+      restartPolicy: Never
+
+
+####namespace + pod + configmap
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devops
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: time-config
+  namespace: devops
+data:
+    TIME_FREQ: "9"
+
+---    
+apiVersion: v1
+kind: Pod
+metadata:
+  name: time-check
+  namespace: devops
+spec:
+  containers:
+    - name: time-check
+      image: busybox:latest
+      command: [ "sh", "-c", "while true; do date; sleep $TIME_FREQ;done >> /opt/security/time/time-check.log" ]
+      env:
+        - name: TIME_FREQ
+          valueFrom:
+            configMapKeyRef:
+              name: time-config
+              key: TIME_FREQ
+      volumeMounts:
+      - name: log-volume
+        mountPath: /opt/security/time
+  volumes:
+    - name: log-volume
+      emptyDir : {}
+  restartPolicy: Never
+
+
+##### namespace + dep & rolling + service
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpd-deploy
+  namespace: devops
+  labels:
+    app: httpd
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 2
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: httpd
+  template:
+    metadata:
+      labels:
+        app: httpd
+    spec:
+      containers:
+      - name: httpd
+        image: httpd:2.4.27
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-service
+  namespace: devops
+spec:
+  type: NodePort
+  selector:
+    app: httpd
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30008
+      protocol: TCP
+
+
+#### jenkins namspc + svc + dep
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jenkins
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins-deployment
+  namespace: jenkins
+  labels:
+    app: jenkins
+spec:
+  replicas: 1
+  #strategy:
+    #type: RollingUpdate
+    #rollingUpdate:
+    #  maxUnavailable: 2
+    #  maxSurge: 1
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+      - name: jenkins-container
+        image: jenkins/jenkins:latest
+        ports:
+          - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins-service
+  namespace: jenkins
+spec:
+  type: NodePort
+  selector:
+    app: jenkins
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30008
+      protocol: TCP              

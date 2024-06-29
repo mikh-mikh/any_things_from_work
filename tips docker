@@ -1,0 +1,37 @@
+docker run -d --name name -p cont:host repository_host:port/image:tag /path/to/binary_to_run
+docker cp ./some_file CONTAINER:/work
+
+#create image from running container:
+docker commit container_name_or_id image:tag
+
+
+#docker networks:
+
+docker network create --driver=bridge --subnet=10.10.1.0/24 --ip-range=10.10.1.1/24 beta
+
+#docker volumes
+
+docker run -d --name devtest --mount type=bind,source=/target,target=/app nginx:latest
+
+#docker pull push
+
+
+#docker save & load images
+
+docker save --output image.tar repo:tag ИЛИ image_id
+docker load < devops.tar (в первом случае получишь тот же id и тэг и репу, во втором - голый образ который сам затегируешь потом)
+
+#docker comose small example
+
+version: '3'
+services:
+  httpd:
+       image: httpd:latest
+       container_name: httpd
+       ports:
+         - "3004:80"
+       volumes:
+         - "/opt/sysops:/usr/local/apache2/htdocs"
+
+docker-compose build 
+docker-compose -d up
